@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Water Usage Monitor — Veolia</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --blue-dark:   #0a2540;
+      --blue-mid:    #1a5f9e;
+      --blue-light:  #3b9edd;
+      --blue-pale:   #e8f4fd;
+      --teal:        #00b4d8;
+      --green:       #22c55e;
+      --amber:       #f59e0b;
+      --red:         #ef4444;
+      --card-bg:     #ffffff;
+      --page-bg:     #f0f7ff;
+      --text-dark:   #0a2540;
+      --text-mid:    #4a6380;
+      --radius:      14px;
+      --shadow:      0 4px 24px rgba(10,37,64,.10);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--page-bg);
+      color: var(--text-dark);
+      min-height: 100vh;
+    }
+    header {
+      background: linear-gradient(135deg, var(--blue-dark) 0%, var(--blue-mid) 100%);
+      color: #fff;
+      padding: 20px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .header-left { display: flex; align-items: center; gap: 14px; }
+    .header-icon { width: 44px; height: 44px; background: rgba(255,255,255,.15); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 22px; }
+    .header-title { font-size: 1.3rem; font-weight: 700; }
+    .header-sub   { font-size: .82rem; opacity: .75; margin-top: 2px; }
+    .header-right { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .btn { padding: 9px 18px; border-radius: 9px; border: none; font-size: .85rem; font-weight: 600; cursor: pointer; transition: opacity .15s, transform .1s; }
+    .btn:active { transform: scale(.97); }
+    .btn:hover  { opacity: .88; }
+    .btn-primary   { background: var(--teal); color: #fff; }
+    .btn-secondary { background: rgba(255,255,255,.18); color: #fff; border: 1px solid rgba(255,255,255,.3); }
+    .btn-outline   { background: #fff; color: var(--blue-mid); border: 1.5px solid var(--blue-light); }
+    .btn-sm { padding: 6px 12px; font-size: .8rem; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 28px 20px; }
+
+    /* Loading overlay */
+    #loadingOverlay {
+      position: fixed; inset: 0; background: rgba(240,247,255,.92);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      z-index: 9999; gap: 18px;
+    }
+    #loadingOverlay.hidden { display: none; }
+    .spinner {
+      width: 48px; height: 48px;
+      border: 5px solid #d1e3f8;
+      border-top-color: var(--blue-mid);
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #loadingMsg { font-size: 1rem; font-weight: 600; color: var(--blue-mid); }
+    #loadingErr { font-size: .88rem; color: var(--red); text-align: center; max-width: 420px; display: none; }
+
+    .sync-badge {
+      font-size: .75rem; background: rgba(255,255,255,.18); color: #fff;
+      padding: 4px 10px; border-radius: 20px; border: 1px solid rgba(255,255,255,.3);
+    }
+    .sync-badge.ok  { background: rgba(34,197,94,.25); border-color: rgba(34,197,94,.5); }
+    .sync-badge.err { background: rgba(239,68,68,.25); border-color: rgba(239,68,68,.5); }
+
+    .alert-banner { background: linear-gradient(135deg, #fef3c7, #fde68a); border: 1.5px solid var(--amber); border-radius: var(--radius); padding: 16px 20px; margin-bottom: 24px; display: flex; align-items: center; gap: 14px; }
+    .alert-banner.danger { background: linear-gradient(135deg, #fee2e2, #fecaca); border-color: var(--red); }
+    .alert-banner.hidden { display: none; }
+    .alert-title { font-weight: 700; font-size: 1rem; }
+    .alert-body  { font-size: .88rem; color: var(--text-mid); margin-top: 3px; }
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .stat-card { background: var(--card-bg); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); border-top: 4px solid var(--blue-light); }
+    .stat-card.alert-card { border-top-color: var(--red); }
+    .stat-card.ok-card    { border-top-color: var(--green); }
+    .stat-label  { font-size: .78rem; font-weight: 600; color: var(--text-mid); text-transform: uppercase; letter-spacing: .04em; }
+    .stat-value  { font-size: 2rem; font-weight: 800; color: var(--blue-dark); margin: 4px 0 2px; }
+    .stat-unit   { font-size: .8rem; color: var(--text-mid); }
+    .stat-badge  { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: .75rem; font-weight: 700; margin-top: 6px; }
+    .badge-red   { background: #fee2e2; color: var(--red); }
+    .badge-green { background: #dcfce7; color: #16a34a; }
+    .badge-grey  { background: #f1f5f9; color: var(--text-mid); }
+    .card { background: var(--card-bg); border-radius: var(--radius); padding: 24px; box-shadow: var(--shadow); margin-bottom: 24px; }
+    .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
+    .card-title { font-size: 1.05rem; font-weight: 700; }
+    .chart-wrap { position: relative; height: 300px; }
+    .threshold-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+    .threshold-label { font-size: .88rem; font-weight: 600; color: var(--text-mid); min-width: 180px; }
+    input[type=range] { flex: 1; min-width: 120px; accent-color: var(--blue-mid); height: 6px; cursor: pointer; }
+    .threshold-value { background: var(--blue-pale); color: var(--blue-mid); font-weight: 800; padding: 5px 14px; border-radius: 8px; font-size: .95rem; min-width: 60px; text-align: center; }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: end; }
+    @media (max-width: 600px) { .form-grid { grid-template-columns: 1fr; } }
+    .form-group label { display: block; font-size: .82rem; font-weight: 600; color: var(--text-mid); margin-bottom: 6px; }
+    .form-group input { width: 100%; padding: 10px 14px; border: 1.5px solid #d1e3f8; border-radius: 9px; font-size: .9rem; outline: none; transition: border-color .15s; }
+    .form-group input:focus { border-color: var(--blue-mid); }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+    thead th { background: var(--blue-pale); color: var(--text-mid); font-weight: 700; font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; padding: 10px 14px; text-align: left; }
+    tbody tr { border-bottom: 1px solid #e8f0f8; transition: background .1s; }
+    tbody tr:hover { background: #f7fbff; }
+    tbody td { padding: 10px 14px; }
+    .spike-row { background: #fff8f8; }
+    .spike-row:hover { background: #ffeaea; }
+    .chip { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: .75rem; font-weight: 700; }
+    .chip-red   { background: #fee2e2; color: var(--red); }
+    .chip-green { background: #dcfce7; color: #16a34a; }
+    .chip-grey  { background: #f1f5f9; color: #64748b; }
+    .del-btn { background: none; border: none; color: #cbd5e1; cursor: pointer; font-size: 1rem; padding: 2px 6px; border-radius: 6px; }
+    .del-btn:hover { color: var(--red); background: #fee2e2; }
+    .modal-overlay { position: fixed; inset: 0; background: rgba(10,37,64,.45); display: flex; align-items: center; justify-content: center; z-index: 1000; opacity: 0; pointer-events: none; transition: opacity .2s; }
+    .modal-overlay.open { opacity: 1; pointer-events: all; }
+    .modal { background: #fff; border-radius: var(--radius); padding: 28px; width: 100%; max-width: 420px; margin: 20px; transform: translateY(20px); transition: transform .2s; }
+    .modal-overlay.open .modal { transform: translateY(0); }
+    .modal-title { font-size: 1.1rem; font-weight: 700; margin-bottom: 16px; }
+    .modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+    .footer { text-align: center; padding: 20px; font-size: .78rem; color: var(--text-mid); }
+    @media (max-width: 768px) { .stats-grid { grid-template-columns: 1fr 1fr; } .card { padding: 16px; } }
+  </style>
+</head>
+<body>
+
+<!-- Loading overlay -->
+<div id="loadingOverlay">
+  <div class="spinner"></div>
+  <div id="loadingMsg">Loading water data…</div>
+  <div id="loadingErr"></div>
+  <button class="btn btn-outline" id="retryBtn" onclick="initDashboard()" style="display:none;margin-top:8px;">↺ Retry</button>
+</div>
+
+<header>
+  <div class="header-left">
+    <div class="header-icon">💧</div>
+    <div>
+      <div class="header-title">Water Usage Monitor</div>
+      <div class="header-sub" id="headerSub">Veolia Water · Loading…</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <span class="sync-badge" id="syncBadge">⏳ Syncing</span>
+    <button class="btn btn-secondary" onclick="openImport()">⬆ Import CSV/JSON</button>
+    <button class="btn btn-secondary" onclick="exportData()">⬇ Export JSON</button>
+    <button class="btn btn-primary"   onclick="openAddModal()">+ Add Reading</button>
+  </div>
+</header>
+
+<div class="container">
+
+  <div id="alertBanner" class="alert-banner hidden">
+    <div style="font-size:28px" id="alertIcon">⚠️</div>
+    <div>
+      <div class="alert-title" id="alertTitle"></div>
+      <div class="alert-body"  id="alertBody"></div>
+    </div>
+  </div>
+
+  <div class="stats-grid">
+    <div class="stat-card" id="cardLatest">
+      <div class="stat-label">Most Recent Day</div>
+      <div class="stat-value" id="statLatest">—</div>
+      <div class="stat-unit">gallons</div>
+      <span class="stat-badge badge-grey" id="badgeLatest">—</span>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">30-Day Average</div>
+      <div class="stat-value" id="stat30Avg">—</div>
+      <div class="stat-unit">gallons / day</div>
+      <span class="stat-badge badge-grey" id="badge30Avg">—</span>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Alert Threshold</div>
+      <div class="stat-value" id="statThreshold">—</div>
+      <div class="stat-unit">gallons (triggers alert)</div>
+      <span class="stat-badge badge-grey">Adjust slider below</span>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Total Readings</div>
+      <div class="stat-value" id="statTotal">0</div>
+      <div class="stat-unit">days logged</div>
+      <span class="stat-badge badge-grey" id="badgeDateRange">—</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Daily Water Usage</div>
+      <div style="font-size:.82rem;color:var(--text-mid);">
+        <span style="color:var(--blue-light)">●</span> Daily &nbsp;
+        <span style="color:var(--teal)">●</span> 30-day avg &nbsp;
+        <span style="color:var(--red)">●</span> Alert threshold
+      </div>
+    </div>
+    <div class="chart-wrap"><canvas id="usageChart"></canvas></div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><div class="card-title">Alert Threshold</div></div>
+    <div class="threshold-row">
+      <div class="threshold-label">Alert when usage exceeds 30-day average by:</div>
+      <input type="range" id="thresholdSlider" min="5" max="200" step="5" value="20" oninput="onSliderChange(this.value)">
+      <div class="threshold-value" id="thresholdDisplay">20%</div>
+    </div>
+    <p style="margin-top:12px;font-size:.83rem;color:var(--text-mid);">
+      At current settings, an alert triggers above <strong id="thresholdGallons">—</strong> gal/day.
+    </p>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Spike History</div>
+      <span id="spikeCount" class="chip chip-grey">0 spikes</span>
+    </div>
+    <div id="spikeCalendar" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+    <div id="noSpikes" style="color:var(--text-mid);font-size:.9rem;padding:12px 0;">No spikes detected — your usage looks normal.</div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">All Readings</div>
+      <button class="btn btn-outline btn-sm" onclick="openAddModal()">+ Add Reading</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Date</th><th>Usage (gal)</th><th>30-Day Avg</th><th>Diff vs Avg</th><th>Status</th><th></th></tr>
+        </thead>
+        <tbody id="readingsBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Hourly Drill-down Card -->
+<div class="card" id="hourlyCard" style="max-width:1200px;margin:0 auto 24px;padding:24px 20px;">
+  <div class="card-header">
+    <div class="card-title">🕐 Hourly Breakdown &amp; Leak Analysis</div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <select id="hourlyDatePicker" onchange="renderHourly(this.value)" style="padding:7px 12px;border:1.5px solid #d1e3f8;border-radius:9px;font-size:.85rem;outline:none;cursor:pointer;"></select>
+      <span id="leakBadge" class="chip chip-grey" style="font-size:.78rem;"></span>
+    </div>
+  </div>
+  <p style="font-size:.83rem;color:var(--text-mid);margin-bottom:16px;">
+    <strong>Leak vs. Event:</strong> A leak shows water running consistently across all 24 hours (especially midnight–6am). A one-time event (e.g. laundry, garden) spikes in specific hours only.
+  </p>
+  <!-- Leak score bar -->
+  <div id="leakScoreRow" style="display:none;margin-bottom:18px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+      <span style="font-size:.82rem;font-weight:700;color:var(--text-mid);">Leak Likelihood Score</span>
+      <span id="leakScoreLabel" style="font-size:.82rem;font-weight:700;"></span>
+    </div>
+    <div style="background:#e8f0f8;border-radius:9px;height:12px;overflow:hidden;">
+      <div id="leakScoreBar" style="height:12px;border-radius:9px;transition:width .4s;"></div>
+    </div>
+    <p id="leakScoreTip" style="margin-top:6px;font-size:.8rem;color:var(--text-mid);"></p>
+  </div>
+  <!-- Stats row -->
+  <div id="hourlyStats" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;"></div>
+  <!-- Chart -->
+  <div class="chart-wrap" style="height:240px;"><canvas id="hourlyChart"></canvas></div>
+  <!-- Night zone legend -->
+  <div style="margin-top:10px;font-size:.78rem;color:var(--text-mid);display:flex;gap:16px;flex-wrap:wrap;">
+    <span><span style="display:inline-block;width:12px;height:12px;background:#3b9edd;border-radius:3px;margin-right:4px;"></span>Daytime usage</span>
+    <span><span style="display:inline-block;width:12px;height:12px;background:#ef4444;border-radius:3px;margin-right:4px;"></span>Night hours (00–06, 22–23)</span>
+    <span><span style="display:inline-block;width:12px;height:12px;background:#f59e0b;border-radius:3px;margin-right:4px;"></span>Peak hour</span>
+  </div>
+</div>
+
+<!-- Telegram Bot Card -->
+<div class="card" style="max-width:1200px;margin:0 auto 24px;padding:24px 20px;border-left: 5px solid #00b4d8; background: linear-gradient(135deg, #f0f9ff, #e0f2fe);">
+  <div class="card-header" style="margin-bottom:12px;">
+    <div class="card-title">💬 Ask Your Water Bot on Telegram</div>
+    <span style="font-size:.8rem;background:#dcfce7;color:#16a34a;padding:3px 10px;border-radius:20px;font-weight:700;">☁️ Cloud — Always On</span>
+  </div>
+  <p style="font-size:.88rem;color:var(--text-mid);margin-bottom:16px;">
+    Your Telegram bot runs 24/7 in the cloud via Vercel — no Mac or computer required. Just message it anytime from your phone.
+  </p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px;">
+    <div style="background:#fff;border-radius:10px;padding:12px 14px;border:1px solid #bae6fd;">
+      <div style="font-weight:700;font-size:.82rem;color:#0369a1;margin-bottom:6px;">📊 Usage Stats</div>
+      <code style="display:block;margin:2px 0;font-size:.8rem;">/status</code>
+      <code style="display:block;margin:2px 0;font-size:.8rem;">/last7</code>
+      <code style="display:block;margin:2px 0;font-size:.8rem;">/avg</code>
+      <code style="display:block;margin:2px 0;font-size:.8rem;">/summary</code>
+    </div>
+    <div style="background:#fff;border-radius:10px;padding:12px 14px;border:1px solid #bae6fd;">
+      <div style="font-weight:700;font-size:.82rem;color:#0369a1;margin-bottom:6px;">📈 Trends</div>
+      <code style="display:block;margin:2px 0;font-size:.8rem;">/trend</code>
+      <code style="display:block;margin:2px 0;font-size:.8rem;">/compare</code>
+      <code style="display:block;margin:2px 0;font-size:.8rem;">/high</code>
+      <code style="display:block;margin:2px 0;font-size:.8rem;">/low</code>
+    </div>
+    <div style="background:#fff;border-radius:10px;padding:12px 14px;border:1px solid #bae6fd;">
+      <div style="font-weight:700;font-size:.82rem;color:#0369a1;margin-bottom:6px;">🔬 Leak Analysis</div>
+      <code style="display:block;margin:2px 0;font-size:.8rem;">/leakcheck</code>
+      <code style="display:block;margin:2px 0;font-size:.8rem;">/spikes</code>
+      <code style="display:block;margin:2px 0;font-size:.8rem;">/hourly 2026-03-14</code>
+      <code style="display:block;margin:2px 0;font-size:.8rem;">/help</code>
+    </div>
+    <div style="background:#fff;border-radius:10px;padding:12px 14px;border:1px solid #bae6fd;">
+      <div style="font-weight:700;font-size:.82rem;color:#0369a1;margin-bottom:6px;">💬 Natural Language</div>
+      <span style="font-size:.8rem;color:var(--text-mid);display:block;margin:2px 0;">"Give me last 7 days"</span>
+      <span style="font-size:.8rem;color:var(--text-mid);display:block;margin:2px 0;">"Was March 14 a leak?"</span>
+      <span style="font-size:.8rem;color:var(--text-mid);display:block;margin:2px 0;">"Am I using more lately?"</span>
+    </div>
+  </div>
+</div>
+
+<div class="footer">Water Usage Monitor · Utsav · Veolia Water US &nbsp;·&nbsp; Dashboard refreshes on each page load · Data auto-updated daily at 8am via GitHub Actions</div>
+
+<!-- Add Modal -->
+<div class="modal-overlay" id="addModal">
+  <div class="modal">
+    <div class="modal-title">➕ Add Reading</div>
+    <div class="form-grid">
+      <div class="form-group"><label>Date</label><input type="date" id="inputDate"/></div>
+      <div class="form-group"><label>Usage (gallons)</label><input type="number" id="inputUsage" placeholder="e.g. 210" min="0" step="0.01"/></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('addModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="addReading()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Import Modal -->
+<div class="modal-overlay" id="importModal">
+  <div class="modal">
+    <div class="modal-title">⬆ Import Data</div>
+    <p style="font-size:.88rem;color:var(--text-mid);margin-bottom:16px;">
+      Import a <strong>water_data.json</strong> file or your Veolia <strong>CSV export</strong>. Daily totals are calculated automatically from hourly CSV data.
+    </p>
+    <input type="file" id="importFile" accept=".json,.csv" style="font-size:.88rem;width:100%;padding:8px;border:1.5px solid #d1e3f8;border-radius:9px;"/>
+    <p style="margin-top:8px;font-size:.8rem;color:var(--text-mid);">Existing readings with matching dates will be overwritten.</p>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('importModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="doImport()">Import</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+let readings   = [];    // [{date, usage}]
+let hourlyData = {};    // {date: [float×24]}
+let threshold  = 20;
+let chart;
+
+// ── Data fetching ─────────────────────────────────────────────────────────────
+async function fetchData() {
+  const res  = await fetch('/api/data', { cache: 'no-cache' });
+  if (!res.ok) throw new Error(`Server returned ${res.status}`);
+  return await res.json();
+}
+
+async function initDashboard() {
+  const overlay  = document.getElementById('loadingOverlay');
+  const msg      = document.getElementById('loadingMsg');
+  const errDiv   = document.getElementById('loadingErr');
+  const retryBtn = document.getElementById('retryBtn');
+  const badge    = document.getElementById('syncBadge');
+
+  overlay.classList.remove('hidden');
+  msg.textContent    = 'Loading water data…';
+  errDiv.style.display = 'none';
+  retryBtn.style.display = 'none';
+
+  try {
+    const data = await fetchData();
+
+    // Apply config
+    const cfg = data.config || {};
+    if (cfg.threshold_percent) {
+      threshold = cfg.threshold_percent;
+      document.getElementById('thresholdSlider').value   = threshold;
+      document.getElementById('thresholdDisplay').textContent = threshold + '%';
+    }
+
+    // Load readings
+    readings   = (data.readings || []).slice().sort((a,b) => a.date.localeCompare(b.date));
+    hourlyData = data.hourly || {};
+
+    // Update header subtitle dynamically
+    if (readings.length >= 2) {
+      const first = readings[0].date;
+      const last  = readings[readings.length-1].date;
+      document.getElementById('headerSub').textContent =
+        `Veolia Water · ${readings.length} days · ${fmtDate(first)} – ${fmtDate(last)}`;
+    }
+
+    // Sync badge
+    const lastUpdated = cfg.last_updated || (readings.length ? readings[readings.length-1].date : '');
+    badge.textContent = lastUpdated ? `✅ Updated ${fmtDate(lastUpdated)}` : '✅ Loaded';
+    badge.className   = 'sync-badge ok';
+
+    overlay.classList.add('hidden');
+    render();
+    populateDatePicker();
+
+  } catch (err) {
+    console.error('Dashboard load error:', err);
+    badge.textContent = '⚠ Offline';
+    badge.className   = 'sync-badge err';
+    msg.textContent   = 'Could not load live data.';
+    errDiv.style.display = 'block';
+    errDiv.textContent = `Error: ${err.message}\n\nMake sure Vercel environment variables are configured (GH_TOKEN, GH_OWNER, GH_REPO).`;
+    retryBtn.style.display = 'block';
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function sorted() { return [...readings].sort((a,b) => a.date.localeCompare(b.date)); }
+function rolling30Avg(data, idx) {
+  const slice = data.slice(Math.max(0, idx - 30), idx);
+  if (!slice.length) return null;
+  return slice.reduce((s,d) => s + d.usage, 0) / slice.length;
+}
+function fmtDate(s) {
+  const [y,m,d] = s.split('-');
+  const mn = ["","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  return `${mn[+m]} ${+d}, ${y}`;
+}
+function fmtNum(n) { return n == null ? '—' : n.toFixed(1); }
+
+// ── Compute ───────────────────────────────────────────────────────────────────
+function computeStats() {
+  const data = sorted();
+  if (!data.length) return null;
+  const last = data[data.length - 1];
+  const avg30 = rolling30Avg(data, data.length);
+  const threshold_gal = avg30 ? avg30 * (1 + threshold / 100) : null;
+  const spikes = data.map((d,i) => {
+    const avg = rolling30Avg(data, i);
+    return avg ? d.usage > avg * (1 + threshold / 100) : false;
+  });
+  return { data, last, avg30, threshold_gal, spikes };
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function render() {
+  const s = computeStats();
+  renderStats(s); renderAlert(s); renderChart(s); renderTable(s); renderSpikes(s);
+}
+
+function renderStats(s) {
+  document.getElementById('statTotal').textContent = readings.length;
+  if (!s) return;
+  const { data, last, avg30, threshold_gal } = s;
+  document.getElementById('statLatest').textContent    = fmtNum(last.usage);
+  document.getElementById('stat30Avg').textContent     = avg30 ? fmtNum(avg30) : '—';
+  document.getElementById('statThreshold').textContent = threshold_gal ? fmtNum(threshold_gal) : '—';
+  document.getElementById('thresholdGallons').textContent = threshold_gal ? fmtNum(threshold_gal) : '—';
+  document.getElementById('badge30Avg').textContent = `Based on ${Math.min(30, data.length)} readings`;
+  if (data.length >= 2)
+    document.getElementById('badgeDateRange').textContent = `${fmtDate(data[0].date)} – ${fmtDate(data[data.length-1].date)}`;
+  if (avg30 && threshold_gal) {
+    const isSpike = last.usage > threshold_gal;
+    const pct = ((last.usage - avg30) / avg30 * 100).toFixed(1);
+    document.getElementById('cardLatest').className = 'stat-card ' + (isSpike ? 'alert-card' : 'ok-card');
+    document.getElementById('badgeLatest').className = 'stat-badge ' + (isSpike ? 'badge-red' : 'badge-green');
+    document.getElementById('badgeLatest').textContent = isSpike
+      ? `↑ ${pct}% above avg!`
+      : `${pct > 0 ? '+' : ''}${pct}% vs avg`;
+  }
+}
+
+function renderAlert(s) {
+  const b = document.getElementById('alertBanner');
+  if (!s || !s.avg30 || !s.threshold_gal) { b.classList.add('hidden'); return; }
+  if (s.last.usage > s.threshold_gal) {
+    b.classList.remove('hidden'); b.classList.add('danger');
+    const pct = ((s.last.usage - s.avg30) / s.avg30 * 100).toFixed(1);
+    document.getElementById('alertTitle').textContent = `Spike on ${fmtDate(s.last.date)}!`;
+    document.getElementById('alertBody').textContent  =
+      `Usage was ${fmtNum(s.last.usage)} gal — ${pct}% above your 30-day average of ${fmtNum(s.avg30)} gal. Possible leak.`;
+    document.getElementById('alertIcon').textContent  = '🚨';
+  } else { b.classList.add('hidden'); }
+}
+
+function renderChart(s) {
+  const ctx = document.getElementById('usageChart').getContext('2d');
+  if (!s) { if (chart) { chart.destroy(); chart = null; } return; }
+  const data   = s.data;
+  const labels = data.map(d => {
+    const [y,m,dy] = d.date.split('-');
+    return `${m}/${dy}`;
+  });
+  const usages = data.map(d => d.usage);
+  const avgs   = data.map((_, i) => rolling30Avg(s.data, i));
+  const thresh = avgs.map(a => a ? parseFloat((a * (1 + threshold / 100)).toFixed(2)) : null);
+  const bgColors = data.map((d, i) => {
+    const avg = avgs[i];
+    return (avg && d.usage > avg * (1 + threshold / 100))
+      ? 'rgba(239,68,68,0.80)' : 'rgba(59,158,221,0.65)';
+  });
+  if (chart) chart.destroy();
+  chart = new Chart(ctx, {
+    data: {
+      labels,
+      datasets: [
+        { type:'bar',  label:'Daily Usage (gal)', data:usages, backgroundColor:bgColors, borderColor:bgColors.map(c=>c.replace(/[\d.]+\)$/,'1)')), borderWidth:1, borderRadius:5, order:3 },
+        { type:'line', label:'30-Day Avg',  data:avgs,   borderColor:'#00b4d8', backgroundColor:'rgba(0,180,216,.08)', borderWidth:2.5, pointRadius:0, tension:.4, fill:true, order:2 },
+        { type:'line', label:`Threshold (+${threshold}%)`, data:thresh, borderColor:'#ef4444', borderWidth:1.5, borderDash:[6,4], pointRadius:0, tension:.4, fill:false, order:1 }
+      ]
+    },
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      interaction:{ intersect:false, mode:'index' },
+      plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label: c => ` ${c.dataset.label}: ${c.raw!=null ? fmtNum(c.raw)+' gal' : '—'}` } } },
+      scales:{
+        x:{ grid:{display:false}, ticks:{maxTicksLimit:12, font:{size:11}} },
+        y:{ beginAtZero:false, grid:{color:'#e8f0f8'}, ticks:{font:{size:11}, callback:v=>v+' gal'} }
+      }
+    }
+  });
+}
+
+function renderTable(s) {
+  const tbody = document.getElementById('readingsBody');
+  if (!s) { tbody.innerHTML = ''; return; }
+  tbody.innerHTML = [...s.data].reverse().map((d, ri) => {
+    const i = s.data.indexOf(d);
+    const avg = rolling30Avg(s.data, i);
+    const isSpike = avg && d.usage > avg * (1 + threshold / 100);
+    const diff = avg ? ((d.usage - avg) / avg * 100).toFixed(1) : null;
+    return `<tr class="${isSpike ? 'spike-row' : ''}">
+      <td>${fmtDate(d.date)}</td>
+      <td><strong>${fmtNum(d.usage)}</strong></td>
+      <td>${avg ? fmtNum(avg) : '—'}</td>
+      <td style="color:${isSpike ? 'var(--red)' : diff < 0 ? 'var(--green)' : 'inherit'}">${diff != null ? (diff > 0 ? '+' : '') + diff + '%' : '—'}</td>
+      <td>${avg ? `<span class="chip ${isSpike ? 'chip-red' : 'chip-green'}">${isSpike ? '⚠ Spike' : '✓ Normal'}</span>` : '<span class="chip chip-grey">Baseline</span>'}</td>
+      <td><button class="del-btn" onclick="deleteReading('${d.date}')" title="Delete">✕</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function renderSpikes(s) {
+  const cal  = document.getElementById('spikeCalendar');
+  const none = document.getElementById('noSpikes');
+  const cnt  = document.getElementById('spikeCount');
+  if (!s) { cal.innerHTML = ''; none.style.display = 'block'; return; }
+  const spikeDays = s.data.filter((d,i) => s.spikes[i]);
+  cnt.textContent = `${spikeDays.length} spike${spikeDays.length===1?'':'s'} detected`;
+  cnt.className   = `chip ${spikeDays.length ? 'chip-red' : 'chip-green'}`;
+  if (!spikeDays.length) { cal.innerHTML=''; none.style.display='block'; return; }
+  none.style.display = 'none';
+  cal.innerHTML = [...spikeDays].reverse().map(d => {
+    const i = s.data.indexOf(d);
+    const avg = rolling30Avg(s.data, i);
+    const pct = avg ? ((d.usage - avg) / avg * 100).toFixed(0) : '?';
+    return `<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:10px 14px;font-size:.82rem;min-width:130px;">
+      <div style="font-weight:700;color:var(--red);">${fmtDate(d.date)}</div>
+      <div style="font-size:1rem;font-weight:800;margin:2px 0;">${fmtNum(d.usage)} gal</div>
+      <div style="color:var(--text-mid);">↑ ${pct}% above avg</div>
+    </div>`;
+  }).join('');
+}
+
+// ── CRUD ──────────────────────────────────────────────────────────────────────
+function addReading() {
+  const date  = document.getElementById('inputDate').value;
+  const usage = parseFloat(document.getElementById('inputUsage').value);
+  if (!date || isNaN(usage) || usage < 0) { alert('Please enter a valid date and usage.'); return; }
+  const idx = readings.findIndex(r => r.date === date);
+  if (idx >= 0) readings[idx].usage = usage; else readings.push({ date, usage });
+  render(); closeModal('addModal');
+}
+function deleteReading(date) {
+  if (!confirm('Delete reading for ' + fmtDate(date) + '?')) return;
+  readings = readings.filter(r => r.date !== date);
+  render();
+}
+function onSliderChange(val) {
+  threshold = parseInt(val);
+  document.getElementById('thresholdDisplay').textContent = threshold + '%';
+  render();
+}
+
+// ── Modals ────────────────────────────────────────────────────────────────────
+function openAddModal() {
+  document.getElementById('inputDate').value  = new Date().toISOString().split('T')[0];
+  document.getElementById('inputUsage').value = '';
+  document.getElementById('addModal').classList.add('open');
+}
+function openImport() { document.getElementById('importModal').classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.modal-overlay').forEach(el =>
+  el.addEventListener('click', e => { if (e.target===el) el.classList.remove('open'); }));
+
+// ── Import ────────────────────────────────────────────────────────────────────
+function doImport() {
+  const file = document.getElementById('importFile').files[0];
+  if (!file) { alert('Please select a file.'); return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const text = e.target.result;
+      let added = 0, updated = 0;
+      if (file.name.endsWith('.csv')) {
+        const lines = text.trim().split('\n');
+        const daily = {};
+        lines.slice(1).forEach(line => {
+          const cols = line.split(',');
+          if (cols.length < 4) return;
+          const date  = cols[1].trim().slice(0, 10);
+          const usage = parseFloat(cols[3].trim()) || 0;
+          daily[date] = (daily[date] || 0) + usage;
+        });
+        Object.entries(daily).forEach(([date, usage]) => {
+          usage = Math.round(usage * 100) / 100;
+          const idx = readings.findIndex(r => r.date === date);
+          if (idx >= 0) { readings[idx].usage = usage; updated++; }
+          else { readings.push({ date, usage }); added++; }
+        });
+      } else {
+        const json = JSON.parse(text);
+        const imported = Array.isArray(json) ? json : (json.readings || []);
+        imported.forEach(r => {
+          if (!r.date || r.usage == null) return;
+          const idx = readings.findIndex(x => x.date === r.date);
+          if (idx >= 0) { readings[idx].usage = r.usage; updated++; }
+          else { readings.push({ date: r.date, usage: r.usage }); added++; }
+        });
+        if (json.hourly) {
+          Object.assign(hourlyData, json.hourly);
+          populateDatePicker();
+        }
+        if (json.config && json.config.threshold_percent) {
+          threshold = json.config.threshold_percent;
+          document.getElementById('thresholdSlider').value = threshold;
+          document.getElementById('thresholdDisplay').textContent = threshold + '%';
+        }
+      }
+      readings.sort((a,b) => a.date.localeCompare(b.date));
+      render(); closeModal('importModal');
+      alert(`Imported! ${added} new readings, ${updated} updated.`);
+    } catch(err) { alert('Error: ' + err.message); }
+  };
+  reader.readAsText(file);
+}
+
+// ── Export ────────────────────────────────────────────────────────────────────
+function exportData() {
+  const json = JSON.stringify({ config:{ threshold_percent:threshold }, readings:sorted(), hourly:hourlyData }, null, 2);
+  const a = document.createElement('a');
+  a.href = 'data:application/json;charset=utf-8,' + encodeURIComponent(json);
+  a.download = 'water_data.json';
+  a.click();
+}
+
+// ── Hourly Section ────────────────────────────────────────────────────────────
+let hourlyChart;
+
+function leakScore(hours) {
+  if (!hours) return { score: 0, label: 'No data', color: '#94a3b8', tip: '' };
+  const active = hours.filter(h => h > 0).length;
+  const night  = hours.slice(0,6).filter(h => h > 0).length;
+  const nightRatio  = night / 6;
+  const activeRatio = active / 24;
+  const score = Math.round(nightRatio * 60 + activeRatio * 40);
+  let label, color, tip;
+  if (score >= 75) { label='High leak risk';    color='#ef4444'; tip='Water running most of the night — strong leak indicator. Check your pipes!'; }
+  else if (score >= 50) { label='Possible leak'; color='#f59e0b'; tip='Significant overnight usage — worth inspecting for drips or running toilets.'; }
+  else if (score >= 25) { label='Monitor closely'; color='#f59e0b'; tip='Some overnight activity — could be normal appliances (ice maker, humidifier) or a minor drip.'; }
+  else { label='Normal pattern'; color='#22c55e'; tip='Usage concentrated in daytime — no leak indicators detected.'; }
+  return { score, label, color, tip, active, night };
+}
+
+function populateDatePicker() {
+  const sel = document.getElementById('hourlyDatePicker');
+  const dates = Object.keys(hourlyData).sort().reverse();
+  if (!dates.length) {
+    sel.innerHTML = '<option value="">No hourly data available</option>';
+    return;
+  }
+  sel.innerHTML = dates.map(d => {
+    const [y,m,dy] = d.split('-');
+    const mn = ["","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    return `<option value="${d}">${mn[+m]} ${+dy}, ${y}</option>`;
+  }).join('');
+  renderHourly(dates[0]);
+}
+
+function renderHourly(dateStr) {
+  const hours = hourlyData[dateStr];
+  if (!hours) return;
+
+  const lk    = leakScore(hours);
+  const total = hours.reduce((a,b)=>a+b,0);
+  const peakH = hours.indexOf(Math.max(...hours));
+  const NIGHT = new Set([0,1,2,3,4,5,22,23]);
+
+  const scoreRow = document.getElementById('leakScoreRow');
+  scoreRow.style.display = 'block';
+  document.getElementById('leakScoreLabel').textContent = `${lk.label} (${lk.score}/100)`;
+  document.getElementById('leakScoreLabel').style.color = lk.color;
+  document.getElementById('leakScoreBar').style.width   = lk.score + '%';
+  document.getElementById('leakScoreBar').style.background = lk.color;
+  document.getElementById('leakScoreTip').textContent   = lk.tip;
+
+  const badge = document.getElementById('leakBadge');
+  badge.textContent = lk.label;
+  badge.className = `chip ${lk.score>=50 ? 'chip-red' : lk.score>=25 ? 'badge-amber' : 'chip-green'}`;
+  badge.style.background = lk.score>=50 ? '#fee2e2' : lk.score>=25 ? '#fef3c7' : '#dcfce7';
+  badge.style.color      = lk.color;
+
+  const statsRow = document.getElementById('hourlyStats');
+  statsRow.innerHTML = [
+    ['Daily Total', `${total.toFixed(1)} gal`, '💧'],
+    ['Active Hours', `${lk.active}/24`, '⏰'],
+    ['Night Active', `${lk.night}/6 hrs`, '🌙'],
+    ['Peak Hour', `${String(peakH).padStart(2,'0')}:00 (${hours[peakH].toFixed(1)} gal)`, '📈'],
+  ].map(([l,v,e]) =>
+    `<div style="background:var(--blue-pale);border-radius:10px;padding:10px 14px;flex:1;min-width:110px;">
+      <div style="font-size:.72rem;font-weight:700;color:var(--text-mid);text-transform:uppercase;">${e} ${l}</div>
+      <div style="font-size:1.1rem;font-weight:800;color:var(--blue-dark);margin-top:3px;">${v}</div>
+    </div>`
+  ).join('');
+
+  const bgColors = hours.map((h, i) => {
+    if (i === peakH) return 'rgba(245,158,11,0.9)';
+    if (NIGHT.has(i)) return h > 0 ? 'rgba(239,68,68,0.75)' : 'rgba(239,68,68,0.15)';
+    return h > 0 ? 'rgba(59,158,221,0.75)' : 'rgba(59,158,221,0.15)';
+  });
+  const labels = hours.map((_,i) => `${String(i).padStart(2,'0')}:00`);
+
+  if (hourlyChart) hourlyChart.destroy();
+  const ctx = document.getElementById('hourlyChart').getContext('2d');
+  hourlyChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Usage (gal)',
+        data: hours,
+        backgroundColor: bgColors,
+        borderColor: bgColors.map(c => c.replace(/[\d.]+\)$/, '1)')),
+        borderWidth: 1,
+        borderRadius: 4,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: t => {
+              const h = parseInt(t[0].label);
+              return `${t[0].label}${(h < 6 || h >= 22) ? ' 🌙 Night' : ''}`;
+            },
+            label: t => ` ${t.raw.toFixed(2)} gal`
+          }
+        }
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { size: 10 }, maxRotation: 45 } },
+        y: { beginAtZero: true, grid: { color: '#e8f0f8' }, ticks: { font:{size:11}, callback: v => v+' gal' } }
+      }
+    }
+  });
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+initDashboard();
+</script>
+</body>
+</html>

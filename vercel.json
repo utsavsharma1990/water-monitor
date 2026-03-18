@@ -1,0 +1,34 @@
+{
+  "version": 2,
+  "name": "water-monitor",
+  "builds": [
+    {
+      "src": "api/*.py",
+      "use": "@vercel/python"
+    },
+    {
+      "src": "index.html",
+      "use": "@vercel/static"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
+    }
+  ],
+  "functions": {
+    "api/webhook.py": {
+      "maxDuration": 10,
+      "memory": 256
+    },
+    "api/data.py": {
+      "maxDuration": 10,
+      "memory": 256
+    }
+  }
+}

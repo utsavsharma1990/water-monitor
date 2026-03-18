@@ -1,0 +1,6 @@
+# Python dependencies for Vercel serverless functions
+# Note: bot_core.py uses only Python stdlib — no extra packages needed for the webhook.
+
+# For the GitHub Actions scraper (scraper.py):
+requests==2.31.0
+beautifulsoup4==4.12.3
